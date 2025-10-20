@@ -1,4 +1,4 @@
-import { analyzeString } from "./utils";
+import { analyzeString, computeSHA256 } from "./utils";
 
 export interface Env {
   STRING_STORE: KVNamespace;
@@ -7,7 +7,7 @@ export interface Env {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const path = url.pathname.replace(/\/\/+$/, "");
+  const path = url.pathname.replace(/\/+$/, "");
   const segments = path.split("/").filter(Boolean); // ['strings'] or ['strings','filter-by-natural-language'] or ['strings','{value}']
   const method = request.method.toUpperCase();
 
@@ -15,14 +15,18 @@ export default {
 
     try {
       // ===== POST /strings =====
-  if (method === "POST" && segments.length === 1 && segments[0] === "strings") {
+      if (method === "POST" && segments.length === 1 && segments[0] === "strings") {
         // request.json() can fail or return unknown; narrow it to a record or null
         const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-        if (!body || typeof body.value !== "string")
+        if (!body || body.value === undefined) {
           return json({ error: "Invalid or missing 'value' field" }, 400);
+        }
+        if (typeof body.value !== "string") {
+          return json({ error: "Invalid data type for 'value' (must be string)" }, 422);
+        }
 
-        const value = (body.value as string).trim();
-        if (!value) return json({ error: "Empty string not allowed" }, 400);
+        const value = body.value as string; // use raw value for hashing and properties
+        if (value.length === 0) return json({ error: "Empty string not allowed" }, 400);
 
         // analyzeString may have a specific return shape; cast to any to avoid TS errors here
         const analysis = (await analyzeString(value)) as any;
@@ -86,8 +90,8 @@ export default {
       if (method === "GET" && segments.length === 2 && segments[0] === "strings") {
         const seg = segments[1];
         if (typeof seg !== "string") return json({ error: "Invalid path" }, 400);
-        const value = decodeURIComponent(seg);
-        const hash = await computeHash(value);
+  const value = decodeURIComponent(seg);
+  const hash = await computeSHA256(value);
         const data = (await env.STRING_STORE.get(hash)) as string | null;
         if (!data) return json({ error: "String not found" }, 404);
         return json(JSON.parse(data));
@@ -97,8 +101,8 @@ export default {
       if (method === "DELETE" && segments.length === 2 && segments[0] === "strings") {
         const seg = segments[1];
         if (typeof seg !== "string") return json({ error: "Invalid path" }, 400);
-        const value = decodeURIComponent(seg);
-        const hash = await computeHash(value);
+  const value = decodeURIComponent(seg);
+  const hash = await computeSHA256(value);
         const data = (await env.STRING_STORE.get(hash)) as string | null;
         if (!data) return json({ error: "String not found" }, 404);
         await env.STRING_STORE.delete(hash);
@@ -106,8 +110,29 @@ export default {
       }
 
       // ===== GET /strings (with optional filters) =====
-  if (method === "GET" && segments.length === 1 && segments[0] === "strings") {
-        // KVNamespace.list() can have complex typing depending on lib; cast to any to iterate safely
+      if (method === "GET" && segments.length === 1 && segments[0] === "strings") {
+        // validate query params types
+        if (url.searchParams.has("is_palindrome")) {
+          const v = url.searchParams.get("is_palindrome");
+          if (v !== "true" && v !== "false") return json({ error: "Invalid query parameter 'is_palindrome'" }, 400);
+        }
+        if (url.searchParams.has("min_length")) {
+          const v = url.searchParams.get("min_length") || "";
+          if (!/^\d+$/.test(v)) return json({ error: "Invalid query parameter 'min_length'" }, 400);
+        }
+        if (url.searchParams.has("max_length")) {
+          const v = url.searchParams.get("max_length") || "";
+          if (!/^\d+$/.test(v)) return json({ error: "Invalid query parameter 'max_length'" }, 400);
+        }
+        if (url.searchParams.has("word_count")) {
+          const v = url.searchParams.get("word_count") || "";
+          if (!/^\d+$/.test(v)) return json({ error: "Invalid query parameter 'word_count'" }, 400);
+        }
+        if (url.searchParams.has("contains_character")) {
+          const v = url.searchParams.get("contains_character") || "";
+          if (v.length === 0) return json({ error: "Invalid query parameter 'contains_character'" }, 400);
+        }
+
         const list = (await env.STRING_STORE.list()) as any;
         const results: any[] = [];
 
@@ -149,19 +174,6 @@ function json(data: any, status = 200): Response {
   });
 }
 
-// Compute SHA-256 for GET/DELETE hash lookup
-async function computeHash(value: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(value);
-  // In Cloudflare Workers the global crypto is available; cast to any to satisfy TS in different environments
-  const subtle = ((globalThis as any).crypto || (globalThis as any).msCrypto)?.subtle as SubtleCrypto | undefined;
-  if (!subtle) throw new Error("SubtleCrypto not available");
-  const hash = await subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 // Filtering logic
 function applyFilters(records: any[], params: URLSearchParams) {
   const applied: Record<string, any> = {};
@@ -193,9 +205,9 @@ function applyFilters(records: any[], params: URLSearchParams) {
 
 
   if (params.has("contains_character")) {
-    const ch = params.get("contains_character") || "";
-    filtered = filtered.filter((r) => r.value.includes(ch));
-    applied.contains_character = ch;
+  const ch = (params.get("contains_character") || "").toLowerCase();
+  filtered = filtered.filter((r) => String(r.value).toLowerCase().includes(ch));
+  applied.contains_character = ch;
   }
 
   return { data: filtered, applied };
