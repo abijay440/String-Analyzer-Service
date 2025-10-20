@@ -1,0 +1,7 @@
+name = "string-analyser-service"
+main = "src/index.ts"
+compatibility_date = "2025-10-20"
+
+[[kv_namespaces]]
+binding = "STRING_STORE"
+id = "xxxxxxxxxxxxxxxxxxxxxx" 
