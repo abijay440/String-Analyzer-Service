@@ -6,15 +6,16 @@ export interface Env {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname.replace(/\/+$/, "");
-    const method = request.method.toUpperCase();
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/\/\/+$/, "");
+  const segments = path.split("/").filter(Boolean); // ['strings'] or ['strings','filter-by-natural-language'] or ['strings','{value}']
+  const method = request.method.toUpperCase();
 
-	console.log("Incoming path:", path);
+  console.log("Incoming path:", path, "segments:", segments);
 
     try {
       // ===== POST /strings =====
-      if (method === "POST" && path === "/strings") {
+  if (method === "POST" && segments.length === 1 && segments[0] === "strings") {
         // request.json() can fail or return unknown; narrow it to a record or null
         const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
         if (!body || typeof body.value !== "string")
@@ -43,7 +44,7 @@ export default {
       }
 
 	    // ===== GET /strings/filter-by-natural-language =====
-      if (method === "GET" && path.startsWith("/strings/filter-by-natural-language")) {
+  if (method === "GET" && segments.length === 2 && segments[0] === "strings" && segments[1] === "filter-by-natural-language") {
         const q = url.searchParams.get("query") || "";
         if (!q) return json({ error: "Missing 'query' parameter" }, 400);
 
@@ -82,9 +83,8 @@ export default {
       }
 
       // ===== GET /strings/{value} =====
-      if (method === "GET" && path.startsWith("/strings/") && path.split("/").length === 3) {
-        const parts = path.split("/");
-        const seg = parts[2];
+      if (method === "GET" && segments.length === 2 && segments[0] === "strings") {
+        const seg = segments[1];
         if (typeof seg !== "string") return json({ error: "Invalid path" }, 400);
         const value = decodeURIComponent(seg);
         const hash = await computeHash(value);
@@ -94,9 +94,8 @@ export default {
       }
 
       // ===== DELETE /strings/{value} =====
-      if (method === "DELETE" && path.startsWith("/strings/") && path.split("/").length === 3) {
-        const parts = path.split("/");
-        const seg = parts[2];
+      if (method === "DELETE" && segments.length === 2 && segments[0] === "strings") {
+        const seg = segments[1];
         if (typeof seg !== "string") return json({ error: "Invalid path" }, 400);
         const value = decodeURIComponent(seg);
         const hash = await computeHash(value);
@@ -107,7 +106,7 @@ export default {
       }
 
       // ===== GET /strings (with optional filters) =====
-      if (method === "GET" && path === "/strings") {
+  if (method === "GET" && segments.length === 1 && segments[0] === "strings") {
         // KVNamespace.list() can have complex typing depending on lib; cast to any to iterate safely
         const list = (await env.STRING_STORE.list()) as any;
         const results: any[] = [];
