@@ -183,5 +183,5 @@ Framework: Native Fetch / Web API
 ## 🧑‍💻 Author
 Abiodun Jegede  
 Full-Stack Developer @ Abisofts  
-Email: abiodun@gmail.com  
+Email: abijay440@gmail.com  
 Stack: TypeScript / Cloudflare Workers / KV Storage
